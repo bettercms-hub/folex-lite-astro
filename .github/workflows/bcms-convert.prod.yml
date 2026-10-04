@@ -1,0 +1,163 @@
+# bettercms-managed rung=prod api=https://api.bettercms.ai project=BIKf8WuN7oWfffynoRQ0g — written by BetterCMS; do not edit
+# Wires this repository's own <form> elements to the CMS forms BetterCMS derived from its site.
+# Dispatched by BetterCMS after a release. Runs NO command from this repository — only the
+# published @bettercms-ai/convert codemod — which is why it may commit while bcms-rebuild.yml,
+# which runs your install and build commands, may not.
+name: BetterCMS Convert
+
+on:
+  repository_dispatch:
+    types: [bcms-convert-prod]
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    if: github.event.client_payload.projectId == 'BIKf8WuN7oWfffynoRQ0g'
+    runs-on: ubuntu-latest
+    env:
+      API_URL: https://api.bettercms.ai
+      PROJECT_ID: BIKf8WuN7oWfffynoRQ0g
+      TARGET_SHA: ${{ github.event.client_payload.targetCommitSha }}
+      TARGET_BRANCH: ${{ github.event.client_payload.branch }}
+      KINDS: ${{ github.event.client_payload.kinds || 'forms' }}
+      ROOT_DIR: ${{ vars.BCMS_ROOT_DIR }}
+
+    steps:
+      # The token rides in the dispatch payload, not in a repository secret, so nothing masks it
+      # for us — and Actions echoes every step's env into the log. It was printed in clear on
+      # the first live run. Mask it before any step names it, and name it only in the two steps
+      # that use it (a job-level env would be echoed by THIS step, before the mask).
+      - name: Mask the callback token
+        run: echo "::add-mask::$(jq -r .client_payload.callbackToken "$GITHUB_EVENT_PATH")"
+
+      - name: Checkout the release's commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.targetCommitSha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ vars.BCMS_NODE_VERSION || '22' }}
+
+      # The COMPLETE brief, every page: the codemod's receipt carries a digest over the whole path
+      # list, and a partial brief would compute one the platform never issued.
+      - name: Read the conversion brief
+        env:
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+        run: |
+          node - <<'BCMS_BRIEF'
+          const fs = require("node:fs");
+          const base = process.env.API_URL + "/api/v1/management/projects/current/conversion-brief";
+          const headers = { Authorization: "Bearer " + process.env.CALLBACK_TOKEN };
+          (async () => {
+            let brief = null;
+            let cursor = "";
+            for (;;) {
+              const url = cursor ? base + "?cursor=" + encodeURIComponent(cursor) : base + "?complete=true";
+              const res = await fetch(url, { headers });
+              if (!res.ok) throw new Error("brief " + res.status + ": " + (await res.text()).slice(0, 300));
+              const { data } = await res.json();
+              if (!brief) brief = { ...data, pages: [] };
+              brief.pages.push(...(data.pages || []));
+              if (!data.cursor) break;
+              cursor = data.cursor;
+            }
+            delete brief.cursor; delete brief.page; delete brief.pageCount;
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/brief.json", JSON.stringify(brief));
+            console.log("brief: " + brief.pages.length + " page(s), " + (brief.forms || []).length + " form(s), " + brief.briefDigest);
+          })().catch((err) => { console.error(err); process.exit(1); });
+          BCMS_BRIEF
+
+      - name: Wire the forms
+        if: contains(env.KINDS, 'forms')
+        run: |
+          npx -y @bettercms-ai/convert@^0.27 --forms --brief "$RUNNER_TEMP/brief.json" --root "${ROOT_DIR:-.}" --receipt "$RUNNER_TEMP/receipt.json"
+
+      # The plan the platform holds for this project's sections: which bands each page places, and
+      # which component renders each. The unflagged read is the codemod's plan.json, verbatim.
+      - name: Read the sections plan
+        if: contains(env.KINDS, 'sections')
+        env:
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+        run: |
+          node - <<'BCMS_PLAN'
+          const fs = require("node:fs");
+          const url = process.env.API_URL + "/api/v1/management/projects/current/componentize-plan";
+          fetch(url, { headers: { Authorization: "Bearer " + process.env.CALLBACK_TOKEN } }).then(async (res) => {
+            if (!res.ok) throw new Error("plan " + res.status + ": " + (await res.text()).slice(0, 300));
+            const { data } = await res.json();
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/plan.json", JSON.stringify(data));
+            console.log("plan: " + (data.pages || []).length + " page(s), digest " + data.digest);
+          }).catch((err) => { console.error(err); process.exit(1); });
+          BCMS_PLAN
+
+      # Each page's hardcoded bands become one <Sections page="…" />: the page's CMS block list, in
+      # the CMS order, each section root stamped. What it cannot do, it leaves and lists by reason.
+      - name: Let BetterCMS control section order
+        if: contains(env.KINDS, 'sections')
+        run: |
+          npx -y @bettercms-ai/convert@^0.27 --componentize --brief "$RUNNER_TEMP/brief.json" --plan "$RUNNER_TEMP/plan.json" --root "${ROOT_DIR:-.}" --receipt "$RUNNER_TEMP/sections.json"
+
+      # A commit only when a file changed, as the Actions bot, [skip ci] for the repository's own
+      # CI. A GITHUB_TOKEN push starts no workflow of ours either — the receipt step asks for the
+      # rebuild instead.
+      - name: Commit what changed
+        id: commit
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            case "$KINDS" in
+              *sections*) git commit -m "chore(bettercms): let BetterCMS control section order [skip ci]" ;;
+              *) git commit -m "chore(bettercms): wire forms to the CMS [skip ci]" ;;
+            esac
+            git push origin "HEAD:refs/heads/$TARGET_BRANCH"
+            echo "pushed=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "pushed=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The codemod's own account, so the dashboard can say which form is wired and which file
+      # each ambiguous one could be in. `rebuild=1` only when something was pushed.
+      - name: Hand back the receipt
+        if: contains(env.KINDS, 'forms')
+        env:
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+          PUSHED: ${{ steps.commit.outputs.pushed }}
+        run: |
+          node - <<'BCMS_RECEIPT'
+          const fs = require("node:fs");
+          const receipt = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/receipt.json", "utf8"));
+          const url = process.env.API_URL + "/api/v1/management/projects/current/conversion-receipt" + (process.env.PUSHED === "1" ? "?rebuild=1" : "");
+          fetch(url, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + process.env.CALLBACK_TOKEN, "Content-Type": "application/json" },
+            body: JSON.stringify({ briefDigest: receipt.briefDigest, receipt }),
+          }).then(async (res) => {
+            const text = await res.text();
+            if (!res.ok) throw new Error("receipt " + res.status + ": " + text.slice(0, 300));
+            console.log(text);
+          }).catch((err) => { console.error(err); process.exit(1); });
+          BCMS_RECEIPT
+
+      # Each extracted section becomes its component's recorded source, so Output can build it.
+      # Best-effort: the order already ships from the commit above, whatever this answers.
+      - name: Record the extracted sections
+        if: contains(env.KINDS, 'sections') && steps.commit.outputs.pushed == '1'
+        continue-on-error: true
+        env:
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+        run: |
+          node - <<'BCMS_SECTIONS'
+          const fs = require("node:fs");
+          const receipt = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/sections.json", "utf8"));
+          fetch(process.env.API_URL + "/api/v1/management/components/preview-sources/componentize-receipt", {
+            method: "POST",
+            headers: { Authorization: "Bearer " + process.env.CALLBACK_TOKEN, "Content-Type": "application/json" },
+            body: JSON.stringify({ receipt: { componentFiles: receipt.componentFiles || [] } }),
+          }).then(async (res) => console.log(res.status + " " + (await res.text()).slice(0, 300)));
+          BCMS_SECTIONS
