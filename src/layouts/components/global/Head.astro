@@ -12,6 +12,41 @@ const fontVariables = fontsJson.map((font) => font.cssVariable) as any[];
 
 <head>
   <meta charset="UTF-8" />
+  {
+    /*
+      BetterCMS visual editor: the page is framed under /__preview/<site>/, where the chunks a
+      module script imports from /_astro/ answer 404, so no script runs (animations stay hidden,
+      menus are dead). Load each failed module again through the preview path and run the
+      DOMContentLoaded handlers it registers. Does nothing on the public site.
+    */
+  }
+  <script is:inline>
+    (() => {
+      const preview = location.pathname.match(/^\/__preview\/[^/]+/);
+      if (!preview) return;
+      const failed = [];
+      document.addEventListener(
+        "error",
+        (e) => e.target.tagName === "SCRIPT" && failed.push(e.target),
+        true,
+      );
+      window.addEventListener("load", async () => {
+        const handlers = [];
+        const add = document.addEventListener;
+        document.addEventListener = function (type, fn, options) {
+          if (type === "DOMContentLoaded") handlers.push(fn);
+          else add.call(this, type, fn, options);
+        };
+        await Promise.allSettled(
+          failed
+            .filter((s) => (s.getAttribute("src") || "").startsWith("/"))
+            .map((s) => import(preview[0] + s.getAttribute("src"))),
+        );
+        document.addEventListener = add;
+        handlers.forEach((fn) => fn(new Event("DOMContentLoaded")));
+      });
+    })();
+  </script>
   <meta http-equiv="Content-Language" content={Astro.currentLocale} />
   <meta name="theme" content="folex-lite" />
   <meta

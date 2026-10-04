@@ -59,6 +59,7 @@ map:
 # Check config.toml file for form action related settings
 # this is also used in the footer of the personal portfolio homepage
 form:
+  bcmsForm: "Let’s Work Together" # Name of the BetterCMS form that receives submissions (Forms tab); leave empty to use the provider in config.toml
   emailSubject: "New form submission from folex website" # Customized email subject (applicable when anyone submit form, form submission may receive by email depend on provider)
   submitButton:
     # Refer to the `sharedButton` schema in `src/sections.schema.ts` for all available configuration options (e.g., enable, label, url, hoverEffect, variant, icon, tag, rel, class, target, etc.)
@@ -75,20 +76,20 @@ form:
   inputs:
     - label: ""
       placeholder: "Full Name *"
-      name: "Full Name" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "full_name" # This is crucial. Its indicate under which name you want to receive this field data
       required: true
       halfWidth: true
       defaultValue: ""
     - label: ""
       placeholder: "Email Address *"
-      name: "Email Address" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "email_address" # This is crucial. Its indicate under which name you want to receive this field data
       required: true
       type: "email"
       halfWidth: true
       defaultValue: ""
     - label: ""
       placeholder: "Subject *"
-      name: "Subject" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "subject" # This is crucial. Its indicate under which name you want to receive this field data
       required: false
       halfWidth: true
       dropdown:
@@ -107,7 +108,7 @@ form:
             selected: false
     - label: ""
       placeholder: "Subject With Search *"
-      name: "Subject With Search" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "subject_with_search" # This is crucial. Its indicate under which name you want to receive this field data
       required: false
       halfWidth: true
       dropdown:
@@ -135,12 +136,12 @@ form:
       defaultValue: ""
       rows: "2" # Only work if tag is textarea
       placeholder: "How can we help you *"
-      name: "Message" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "message" # This is crucial. Its indicate under which name you want to receive this field data
       required: true
       halfWidth: false
     - label: "Google Search" # only valid for type="checkbox" & type === "radio"
       checked: false # only valid for type="checkbox" & type === "radio"
-      name: "User Source" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "user_source" # This is crucial. Its indicate under which name you want to receive this field data
       required: true
       groupLabel: "How did you hear about us?" # Radio Inputs Label
       group: "source" # when you add group then it will omit space between the same group radio input
@@ -148,7 +149,7 @@ form:
       halfWidth: true
       defaultValue: ""
     - label: "Social Media" # only valid for type="checkbox" & type === "radio"
-      name: "User Source" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "user_source" # This is crucial. Its indicate under which name you want to receive this field data
       required: true
       groupLabel: "" # Radio Inputs Label
       group: "source" # when you add group then it will omit space between the same group radio input
@@ -156,7 +157,7 @@ form:
       halfWidth: true
       defaultValue: ""
     # - label: "Referral" # only valid for type="checkbox" & type === "radio"
-    #   name: "User Source" # This is crucial. Its indicate under which name you want to receive this field data
+    #   name: "user_source" # This is crucial. Its indicate under which name you want to receive this field data
     #   required: true
     #   groupLabel: "" # Radio Inputs Label
     #   group: "source" # when you add group then it will omit space between the same group radio input
@@ -164,7 +165,7 @@ form:
     #   halfWidth: true
     #   defaultValue: ""
     # - label: "Other" # only valid for type="checkbox" & type === "radio"
-    #   name: "User Source" # This is crucial. Its indicate under which name you want to receive this field data
+    #   name: "user_source" # This is crucial. Its indicate under which name you want to receive this field data
     #   required: true
     #   groupLabel: "" # Radio Inputs Label
     #   group: "source" # when you add group then it will omit space between the same group radio input
@@ -173,7 +174,7 @@ form:
     #   defaultValue: ""
     - label: "I agree to the terms and conditions and [privacy policy](/)." # only valid for type="checkbox" & type === "radio"
       id: "privacy-policy"
-      name: "Agreed Privacy" # This is crucial. Its indicate under which name you want to receive this field data
+      name: "agreed_privacy" # This is crucial. Its indicate under which name you want to receive this field data
       value: "Agreed" # Value that will be submit (applicable for type="checkbox" & type === "radio")
       checked: false # only valid for type="checkbox" & type === "radio"
       required: true

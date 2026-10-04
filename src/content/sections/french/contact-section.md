@@ -59,6 +59,7 @@ map:
 # Vérifiez le fichier config.toml pour les paramètres liés au formulaire
 # ce formulaire est aussi utilisé dans le pied de page du portfolio personnel
 form:
+  bcmsForm: "Travaillons Ensemble" # Name of the BetterCMS form that receives submissions (Forms tab); leave empty to use the provider in config.toml
   emailSubject: "Nouvelle soumission de formulaire depuis le site folex" # Sujet personnalisé de l’email (valable à chaque soumission)
   submitButton:
     label: "ENVOYER LE MESSAGE"
@@ -68,20 +69,20 @@ form:
   inputs:
     - label: ""
       placeholder: "Nom complet *"
-      name: "Nom complet" # Indique sous quel nom vous voulez recevoir cette donnée
+      name: "full_name" # Indique sous quel nom vous voulez recevoir cette donnée
       required: true
       halfWidth: true
       defaultValue: ""
     - label: ""
       placeholder: "Adresse e-mail *"
-      name: "Adresse e-mail" # Indique sous quel nom vous voulez recevoir cette donnée
+      name: "email_address" # Indique sous quel nom vous voulez recevoir cette donnée
       required: true
       type: "email"
       halfWidth: true
       defaultValue: ""
     - label: ""
       placeholder: "Sujet *"
-      name: "Sujet" # Indique sous quel nom vous voulez recevoir cette donnée
+      name: "subject" # Indique sous quel nom vous voulez recevoir cette donnée
       required: false
       halfWidth: true
       dropdown:
@@ -100,7 +101,7 @@ form:
             selected: false
     - label: ""
       placeholder: "Sujet avec recherche *"
-      name: "Sujet avec recherche" # Indique sous quel nom vous voulez recevoir cette donnée
+      name: "subject_with_search" # Indique sous quel nom vous voulez recevoir cette donnée
       required: false
       halfWidth: true
       dropdown:
@@ -128,12 +129,12 @@ form:
       defaultValue: ""
       rows: "2"
       placeholder: "Comment pouvons-nous vous aider *"
-      name: "Message" # Indique sous quel nom vous voulez recevoir cette donnée
+      name: "message" # Indique sous quel nom vous voulez recevoir cette donnée
       required: true
       halfWidth: false
     - label: "Recherche Google"
       checked: false
-      name: "Source Utilisateur"
+      name: "user_source"
       required: true
       groupLabel: "Comment avez-vous entendu parler de nous ?"
       group: "source"
@@ -141,7 +142,7 @@ form:
       halfWidth: true
       defaultValue: ""
     - label: "Réseaux sociaux"
-      name: "Source Utilisateur"
+      name: "user_source"
       required: true
       groupLabel: ""
       group: "source"
@@ -149,7 +150,7 @@ form:
       halfWidth: true
       defaultValue: ""
     # - label: "Parrainage"
-    #   name: "Source Utilisateur"
+    #   name: "user_source"
     #   required: true
     #   groupLabel: ""
     #   group: "source"
@@ -157,7 +158,7 @@ form:
     #   halfWidth: true
     #   defaultValue: ""
     # - label: "Autre"
-    #   name: "Source Utilisateur"
+    #   name: "user_source"
     #   required: true
     #   groupLabel: ""
     #   group: "source"
@@ -166,7 +167,7 @@ form:
     #   defaultValue: ""
     - label: "J'accepte les termes et conditions ainsi que la [politique de confidentialité](/)."
       id: "privacy-policy"
-      name: "Consentement confidentialité"
+      name: "agreed_privacy"
       value: "Accepté"
       checked: false
       required: true

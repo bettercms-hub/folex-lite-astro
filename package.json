@@ -25,7 +25,8 @@
     "remove-multilingual": "node ./scripts/remove-multilingual.mjs",
     "remove-draft-from-sitemap": "node ./scripts/remove-draft-from-sitemap.mjs",
     "format": "prettier -w ./src",
-    "deploy:cf": "wrangler pages deploy"
+    "deploy:cf": "wrangler pages deploy",
+    "build:bcms": "npm run build && node scripts/bcms-bindings.mjs"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -58,6 +59,7 @@
     "astro": "^7.0.2",
     "astro-font": "^1.1.0",
     "gray-matter": "^4.0.3",
+    "parse5": "^7.3.0",
     "prettier": "^3.8.0",
     "prettier-plugin-astro": "^0.14.1",
     "prettier-plugin-tailwindcss": "^0.7.2",

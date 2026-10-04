@@ -6,15 +6,22 @@ import type { contactFormSchema } from "@/sections.schema";
 import type { inputFieldSchema } from "@/sections.schema";
 import { getPrelineSelectConfig } from "@/lib/utils/preline";
 import config from ".astro/config.generated.json";
+import { bcmsFormAction, bcmsFormId } from "@/bcms-forms";
 
 interface Props {
   form: z.infer<typeof contactFormSchema>;
   class?: string;
 }
 
-const {
-  settings: { contactFormAction, contactFormProvider },
-} = config;
+// A BetterCMS form named in the content takes over when this build can resolve it
+const bcmsName = Astro.props.form.bcmsForm;
+const bcmsId = bcmsName ? bcmsFormId(bcmsName) : undefined;
+const contactFormProvider = bcmsId
+  ? "bettercms"
+  : config.settings.contactFormProvider;
+const contactFormAction =
+  (bcmsId && bcmsName && bcmsFormAction(bcmsName)) ||
+  config.settings.contactFormAction;
 
 // Generate ID from label (Required for Input Radio and Checkbox)
 const genIdFromLabel = (label: string) => toLowerCase(label).replace(" ", "-");
@@ -84,7 +91,10 @@ const noteStyles = {
     "data-action": contactFormAction,
     "data-provider": contactFormProvider,
     "data-netlify": contactFormProvider === "netlify" ? "true" : undefined,
-    action: contactFormProvider === "netlify" ? contactFormAction : undefined,
+    "data-bcms-form": bcmsId,
+    action: ["netlify", "bettercms"].includes(contactFormProvider)
+      ? contactFormAction
+      : undefined,
   }}
   method="post"
   class:list={["grid grid-cols-2 gap-x-4 gap-y-6", Astro.props.class]}>
@@ -94,7 +104,9 @@ const noteStyles = {
       <input
         type="hidden"
         name={
-          ["formsubmit.co", "formspree"].includes(contactFormProvider)
+          ["formsubmit.co", "formspree", "bettercms"].includes(
+            contactFormProvider,
+          )
             ? "_subject"
             : "subject"
         }
@@ -113,6 +125,7 @@ const noteStyles = {
     form.inputs.map((input) => (
       <div
         input-wrapper
+        data-bcms-form-field={bcmsId && (input.name || input.items?.[0]?.name)}
         class:list={[
           "flex flex-col",
           input.halfWidth ? "max-sm:col-span-2" : "col-span-2",
@@ -122,7 +135,10 @@ const noteStyles = {
           input.type !== "checkbox" &&
           input.type !== "radio" &&
           (input.groupLabel || input.label) && (
-            <label for="name" class="form-label">
+            <label
+              for="name"
+              class="form-label"
+              data-bcms-form-part={bcmsId && "label"}>
               {input.groupLabel || input.label || "Please set label"}
               {input.required && <span class="text-primary">*</span>}
             </label>
@@ -190,6 +206,7 @@ const noteStyles = {
                 <label
                   for={input.id || genIdFromLabel(input.label || "example-id")}
                   class="form-check-label"
+                  data-bcms-form-part={bcmsId && "option"}
                   set:html={markdownify(input.label) || "Example Label"}
                 />
               </div>
@@ -217,6 +234,7 @@ const noteStyles = {
             <label
               for={input.id || genIdFromLabel(input.label || "example-id")}
               class="form-check-label"
+              data-bcms-form-part={bcmsId && "label"}
               set:html={
                 (input.label && markdownify(input.label)) ||
                 input.label ||
@@ -257,6 +275,7 @@ const noteStyles = {
           type="submit"
           hoverEffect="creative-fill"
           class="text-base-sm effect-color-light w-fit md:text-base"
+          data-bcms-form-part={bcmsId && "submit"}
           {...form.submitButton}
         />
       </div>
@@ -270,6 +289,7 @@ const noteStyles = {
       />
     )
   }
+  {bcmsId && <p class="bcms-form-msg" hidden />}
 </form>
 
 <script>
@@ -278,6 +298,7 @@ const noteStyles = {
     formspreeSubmit,
     netlifySubmit,
     formSubmit,
+    formReset,
     isFormFilled,
     setMessage,
     validateSelectTag,
@@ -360,6 +381,19 @@ const noteStyles = {
                 form,
               );
               break;
+            case "bettercms": {
+              const response = await fetch(action, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  data: Object.fromEntries(new FormData(form).entries()),
+                }),
+              });
+              if (!response.ok) throw new Error("Submission failed");
+              setMessage("default", true, false, form);
+              formReset(form);
+              break;
+            }
             default:
               throw new Error("Unknown form provider.");
           }
