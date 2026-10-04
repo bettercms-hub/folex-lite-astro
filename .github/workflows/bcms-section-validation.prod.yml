@@ -1,0 +1,186 @@
+# bettercms-managed rung=prod api=https://api.bettercms.ai project=BIKf8WuN7oWfffynoRQ0g — written by BetterCMS; do not edit
+# Validates one BetterCMS Section implementation in this repository's real app shell.
+# BetterCMS dispatches the request but never executes this repository's code.
+name: BetterCMS Section Validation
+# The request id in the run's title is how BetterCMS attributes a run that fails before it can report.
+run-name: BetterCMS section validation ${{ github.event.client_payload.requestId }}
+
+on:
+  repository_dispatch:
+    types: [bcms-section-validate-prod]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-section:
+    if: github.event.client_payload.projectId == 'BIKf8WuN7oWfffynoRQ0g'
+    runs-on: ubuntu-latest
+    env:
+      API_URL: https://api.bettercms.ai
+      PROJECT_ID: BIKf8WuN7oWfffynoRQ0g
+      REQUEST_ID: ${{ github.event.client_payload.requestId }}
+      SECTION_ID: ${{ github.event.client_payload.sectionId }}
+      SECTION_VERSION: ${{ github.event.client_payload.version }}
+      SECTION_API_ID: ${{ github.event.client_payload.apiId }}
+      SECTION_SCHEMA_HASH: ${{ github.event.client_payload.schemaHash }}
+      TARGET_SHA: ${{ github.event.client_payload.targetCommitSha }}
+      ROOT_DIR: ${{ vars.BCMS_ROOT_DIR }}
+      INSTALL_CMD: ${{ vars.BCMS_INSTALL_COMMAND }}
+      PKG_MANAGER: ${{ vars.BCMS_PKG_MANAGER }}
+      RUN_ID: ${{ github.run_id }}
+      RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Check the BetterCMS API key
+        env:
+          API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+        run: |
+          STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $API_KEY" "$API_URL/api/v1/projects/$PROJECT_ID/section-evidence/implementation-requests?limit=1" || true)"
+          if [ "$STATUS" = "401" ]; then
+            echo "BCMS_SECTION_FAILURE_CODE=API_KEY_REJECTED_RECONNECT_RUNG" >> "$GITHUB_ENV"
+            echo "::error title=API_KEY_REJECTED_RECONNECT_RUNG::BetterCMS rejected this repository's API key; reconnect this rung to set BCMS_API_KEY_PROD."
+            exit 1
+          fi
+
+      - name: Checkout pinned implementation
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.targetCommitSha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ vars.BCMS_NODE_VERSION || '22' }}
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Claim exact request and commit
+        env:
+          API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+        run: |
+          echo "::add-mask::$CALLBACK_TOKEN"
+          jq -nc             --arg commitSha "$TARGET_SHA"             --arg providerRunId "$RUN_ID"             --arg providerRunUrl "$RUN_URL"             '{commitSha:$commitSha,providerRunId:$providerRunId,providerRunUrl:$providerRunUrl}'             > "$RUNNER_TEMP/bcms-section-claim.json"
+          STATUS="$(curl -sS -o "$RUNNER_TEMP/bcms-section-request.json" -w '%{http_code}'             -X POST "$API_URL/api/v1/projects/$PROJECT_ID/section-evidence/implementation-requests/$REQUEST_ID/claim"             -H "Authorization: Bearer $API_KEY"             -H "X-BCMS-Section-Callback: $CALLBACK_TOKEN"             -H "Content-Type: application/json"             --data-binary @"$RUNNER_TEMP/bcms-section-claim.json" || true)"
+          case "$STATUS" in 2??) ;; *) echo "::error::the claim was refused with HTTP $STATUS"; exit 1 ;; esac
+          echo "BCMS_SECTION_REQUEST_FILE=$RUNNER_TEMP/bcms-section-request.json" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          if [ -n "${ROOT_DIR:-}" ] && [ "$ROOT_DIR" != "/" ] && [ "$ROOT_DIR" != "." ]; then
+            cd "$ROOT_DIR" || {
+              echo "BCMS_SECTION_FAILURE_CODE=SECTION_ROOT_DIR_MISSING" >> "$GITHUB_ENV"
+              echo "::error::configured root directory '$ROOT_DIR' not found"
+              exit 1
+            }
+          fi
+          if [ ! -f package.json ] || ! node -e "process.exit((require('./package.json').scripts||{})['bcms:validate-section']?0:1)"; then
+            echo "BCMS_SECTION_FAILURE_CODE=SECTION_VALIDATION_COMMAND_MISSING" >> "$GITHUB_ENV"
+            echo "::error::package.json must define the 'bcms:validate-section' script. It must run the real app-shell checks and submit request-bound manifest + responsive validation evidence."
+            exit 1
+          fi
+
+          # BetterCMS package-manager setup — sourced before every dependency install.
+          # Embedded into the generated GitHub workflows (helpers.ts) and sourced by build.sh.
+          # pnpm takes its major from pnpm-lock.yaml, as Vercel does: Corepack otherwise fetches
+          # the newest pnpm, which refuses a lockfile an older major wrote (ERR_PNPM_BROKEN_LOCKFILE).
+          # A packageManager field in package.json names the exact version, and Corepack honors it.
+          corepack enable || true
+          if [ -f pnpm-lock.yaml ] && ! grep -q '"packageManager"' package.json 2>/dev/null; then
+            BCMS_PNPM_LOCKFILE="$(grep -m1 '^lockfileVersion' pnpm-lock.yaml | tr -dc '0-9.' || true)"
+            case "$BCMS_PNPM_LOCKFILE" in
+              5.[0-3]*) BCMS_PNPM=6 ;;
+              5.4*) BCMS_PNPM=7 ;;
+              6.*) BCMS_PNPM=8 ;;
+              9.*) BCMS_PNPM=9 ;;
+              *) BCMS_PNPM="" ;;
+            esac
+            if [ -n "$BCMS_PNPM" ]; then
+              echo "pnpm-lock.yaml is lockfileVersion $BCMS_PNPM_LOCKFILE: using pnpm $BCMS_PNPM"
+              # Never fatal: a pin that cannot be fetched leaves the default pnpm, as before this file.
+              corepack install -g "pnpm@$BCMS_PNPM" || npm install -g --force "pnpm@$BCMS_PNPM" \
+                || echo "::warning::could not install pnpm $BCMS_PNPM; continuing with the default pnpm"
+            fi
+          fi
+          if [ -n "$PKG_MANAGER" ]; then PM="$PKG_MANAGER"
+          elif [ -f bun.lock ] || [ -f bun.lockb ]; then PM="bun"
+          elif [ -f pnpm-lock.yaml ]; then PM="pnpm"
+          elif [ -f yarn.lock ]; then PM="yarn"
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then PM="npm"
+          else PM="npm-nolock"
+          fi
+
+          echo "BCMS_SECTION_FAILURE_CODE=SECTION_DEPENDENCY_INSTALL_FAILED" >> "$GITHUB_ENV"
+          if [ -n "${INSTALL_CMD:-}" ]; then
+            sh -c "$INSTALL_CMD"
+          else
+            case "$PM" in
+              bun) bun install ;;
+              pnpm) pnpm install || pnpm install --no-frozen-lockfile ;;
+              yarn) yarn install ;;
+              npm) npm ci || npm install ;;
+              npm-nolock) npm install ;;
+              *) echo "BCMS_SECTION_FAILURE_CODE=SECTION_PACKAGE_MANAGER_INVALID" >> "$GITHUB_ENV"; exit 1 ;;
+            esac
+          fi
+
+      - name: Validate Section in the actual app shell
+        env:
+          BCMS_API_URL: https://api.bettercms.ai
+          BCMS_API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+          BCMS_SECTION_CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+          BCMS_PROJECT_ID: BIKf8WuN7oWfffynoRQ0g
+          BCMS_SECTION_REQUEST_ID: ${{ github.event.client_payload.requestId }}
+          BCMS_SECTION_ID: ${{ github.event.client_payload.sectionId }}
+          BCMS_SECTION_VERSION: ${{ github.event.client_payload.version }}
+          BCMS_SECTION_API_ID: ${{ github.event.client_payload.apiId }}
+          BCMS_SECTION_SCHEMA_HASH: ${{ github.event.client_payload.schemaHash }}
+          BCMS_SECTION_COMMIT_SHA: ${{ github.event.client_payload.targetCommitSha }}
+        run: |
+          echo "::add-mask::$BCMS_SECTION_CALLBACK_TOKEN"
+          if [ -n "${ROOT_DIR:-}" ] && [ "$ROOT_DIR" != "/" ] && [ "$ROOT_DIR" != "." ]; then
+            cd "$ROOT_DIR"
+          fi
+          if [ -n "$PKG_MANAGER" ]; then PM="$PKG_MANAGER"
+          elif [ -f bun.lock ] || [ -f bun.lockb ]; then PM="bun"
+          elif [ -f pnpm-lock.yaml ]; then PM="pnpm"
+          elif [ -f yarn.lock ]; then PM="yarn"
+          else PM="npm"
+          fi
+          echo "BCMS_SECTION_FAILURE_CODE=SECTION_VALIDATION_COMMAND_FAILED" >> "$GITHUB_ENV"
+          case "$PM" in
+            bun) bun run bcms:validate-section ;;
+            pnpm) pnpm run bcms:validate-section ;;
+            yarn) yarn run bcms:validate-section ;;
+            *) npm run bcms:validate-section ;;
+          esac
+
+      - name: Confirm request-bound evidence
+        env:
+          API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+        run: |
+          echo "::add-mask::$CALLBACK_TOKEN"
+          curl -fsS             -X POST "$API_URL/api/v1/projects/$PROJECT_ID/section-evidence/implementation-requests/$REQUEST_ID/complete"             -H "Authorization: Bearer $API_KEY"             -H "X-BCMS-Section-Callback: $CALLBACK_TOKEN"             -H "Content-Type: application/json"             --data '{}'
+
+      - name: Report validation failure to BetterCMS
+        if: failure()
+        env:
+          FAILURE_CODE: ${{ env.BCMS_SECTION_FAILURE_CODE }}
+          API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+          CALLBACK_TOKEN: ${{ github.event.client_payload.callbackToken }}
+        run: |
+          echo "::add-mask::$CALLBACK_TOKEN"
+          case "${FAILURE_CODE:-SECTION_VALIDATION_WORKFLOW_FAILED}" in
+            SECTION_ROOT_DIR_MISSING) MESSAGE="The configured BetterCMS root directory does not exist." ;;
+            SECTION_VALIDATION_COMMAND_MISSING) MESSAGE="package.json must define the bcms:validate-section script." ;;
+            SECTION_PACKAGE_MANAGER_INVALID) MESSAGE="The configured package manager is not supported." ;;
+            SECTION_DEPENDENCY_INSTALL_FAILED) MESSAGE="The repository dependency installation failed." ;;
+            SECTION_VALIDATION_COMMAND_FAILED) MESSAGE="The repository Section validation command failed." ;;
+            API_KEY_REJECTED_RECONNECT_RUNG) MESSAGE="BetterCMS rejected this repository's API key; reconnect this rung to set BCMS_API_KEY_PROD." ;;
+            *) FAILURE_CODE="SECTION_VALIDATION_WORKFLOW_FAILED"; MESSAGE="The external Section validation workflow failed." ;;
+          esac
+          jq -nc             --arg errorCode "${FAILURE_CODE:-SECTION_VALIDATION_WORKFLOW_FAILED}"             --arg errorMessage "$MESSAGE"             --arg providerRunId "$RUN_ID"             --arg providerRunUrl "$RUN_URL"             '{errorCode:$errorCode,errorMessage:$errorMessage,providerRunId:$providerRunId,providerRunUrl:$providerRunUrl}'             > "$RUNNER_TEMP/bcms-section-failure.json"
+          curl -sS -o /dev/null             -X POST "$API_URL/api/v1/projects/$PROJECT_ID/section-evidence/implementation-requests/$REQUEST_ID/fail"             -H "Authorization: Bearer $API_KEY"             -H "X-BCMS-Section-Callback: $CALLBACK_TOKEN"             -H "Content-Type: application/json"             --data-binary @"$RUNNER_TEMP/bcms-section-failure.json" || true
