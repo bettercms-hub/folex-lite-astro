@@ -1,0 +1,98 @@
+# bettercms-managed rung=prod api=https://api.bettercms.ai project=BIKf8WuN7oWfffynoRQ0g — written by BetterCMS; do not edit
+# Validates one BetterCMS component in this repository's real app. No script in this repository is
+# required: BetterCMS dispatches the request, and this runner builds and checks the component.
+name: BetterCMS Component Validation
+# The request id in the run's title is how BetterCMS attributes a run that fails before it can report.
+run-name: BetterCMS component validation ${{ github.event.client_payload.requestId }}
+
+on:
+  repository_dispatch:
+    types: [bcms-component-validate-prod]
+
+permissions:
+  contents: read
+
+jobs:
+  validate-component:
+    if: github.event.client_payload.projectId == 'BIKf8WuN7oWfffynoRQ0g'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BCMS_API_URL: https://api.bettercms.ai
+      BCMS_PROJECT_ID: BIKf8WuN7oWfffynoRQ0g
+      BCMS_REQUEST_ID: ${{ github.event.client_payload.requestId }}
+      BCMS_COMPONENT_ID: ${{ github.event.client_payload.componentId }}
+      BCMS_COMMIT_SHA: ${{ github.event.client_payload.targetCommitSha }}
+      BCMS_FAMILY_KEY: ${{ github.event.client_payload.familyKey }}
+      BCMS_PREVIEW_ORIGIN: ${{ github.event.client_payload.previewOrigin }}
+      BCMS_NATIVE_VIEWPORTS: ${{ toJSON(github.event.client_payload.nativeViewports) }}
+      # Several components validated against one build. `null` when the dispatch names just one.
+      BCMS_BATCH: ${{ toJSON(github.event.client_payload.batch) }}
+      # A runtime refresh: rebuild already-validated components' preview runtime at this commit, no request. `null` otherwise.
+      BCMS_REFRESH: ${{ toJSON(github.event.client_payload.refresh) }}
+      BCMS_WORKFLOW_REF: ${{ github.workflow_ref }}
+      BCMS_RUN_ID: ${{ github.run_id }}
+      BCMS_RUN_ATTEMPT: ${{ github.run_attempt }}
+      BCMS_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      ROOT_DIR: ${{ vars.BCMS_ROOT_DIR }}
+      INSTALL_CMD: ${{ vars.BCMS_INSTALL_COMMAND }}
+      PKG_MANAGER: ${{ vars.BCMS_PKG_MANAGER }}
+    steps:
+      - name: Check the BetterCMS API key
+        env:
+          BCMS_API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+        run: |
+          STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $BCMS_API_KEY" "$BCMS_API_URL/api/v1/projects/$BCMS_PROJECT_ID/component-implementation/implementation-requests?limit=1" || true)"
+          if [ "$STATUS" = "401" ]; then
+            echo "::error title=API_KEY_REJECTED_RECONNECT_RUNG::BetterCMS rejected this repository's API key; reconnect this rung to set BCMS_API_KEY_PROD."
+            exit 1
+          fi
+      - name: Checkout pinned commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.client_payload.targetCommitSha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ vars.BCMS_NODE_VERSION || '22' }}
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: |
+          if [ -n "${ROOT_DIR:-}" ] && [ "$ROOT_DIR" != "/" ] && [ "$ROOT_DIR" != "." ]; then cd "$ROOT_DIR"; fi
+          # BetterCMS package-manager setup — sourced before every dependency install.
+          # Embedded into the generated GitHub workflows (helpers.ts) and sourced by build.sh.
+          # pnpm takes its major from pnpm-lock.yaml, as Vercel does: Corepack otherwise fetches
+          # the newest pnpm, which refuses a lockfile an older major wrote (ERR_PNPM_BROKEN_LOCKFILE).
+          # A packageManager field in package.json names the exact version, and Corepack honors it.
+          corepack enable || true
+          if [ -f pnpm-lock.yaml ] && ! grep -q '"packageManager"' package.json 2>/dev/null; then
+            BCMS_PNPM_LOCKFILE="$(grep -m1 '^lockfileVersion' pnpm-lock.yaml | tr -dc '0-9.' || true)"
+            case "$BCMS_PNPM_LOCKFILE" in
+              5.[0-3]*) BCMS_PNPM=6 ;;
+              5.4*) BCMS_PNPM=7 ;;
+              6.*) BCMS_PNPM=8 ;;
+              9.*) BCMS_PNPM=9 ;;
+              *) BCMS_PNPM="" ;;
+            esac
+            if [ -n "$BCMS_PNPM" ]; then
+              echo "pnpm-lock.yaml is lockfileVersion $BCMS_PNPM_LOCKFILE: using pnpm $BCMS_PNPM"
+              # Never fatal: a pin that cannot be fetched leaves the default pnpm, as before this file.
+              corepack install -g "pnpm@$BCMS_PNPM" || npm install -g --force "pnpm@$BCMS_PNPM" \
+                || echo "::warning::could not install pnpm $BCMS_PNPM; continuing with the default pnpm"
+            fi
+          fi
+          if [ -n "${INSTALL_CMD:-}" ]; then sh -c "$INSTALL_CMD"
+          elif [ -n "$PKG_MANAGER" ]; then "$PKG_MANAGER" install
+          elif [ -f bun.lock ] || [ -f bun.lockb ]; then bun install
+          elif [ -f pnpm-lock.yaml ]; then pnpm install || pnpm install --no-frozen-lockfile
+          elif [ -f yarn.lock ]; then yarn install
+          elif [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci || npm install
+          else npm install
+          fi
+      - name: Validate component
+        env:
+          BCMS_API_KEY: ${{ secrets.BCMS_API_KEY_PROD || secrets.BCMS_API_KEY }}
+        run: |
+          if [ -n "${ROOT_DIR:-}" ] && [ "$ROOT_DIR" != "/" ] && [ "$ROOT_DIR" != "." ]; then cd "$ROOT_DIR"; fi
+          npx --yes @bettercms-ai/preview-runtime@0.6.1 validate
